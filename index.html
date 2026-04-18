@@ -1,0 +1,239 @@
+<html>
+<head>
+    <meta charset="utf8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <link rel="stylesheet" href="index.css">
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans|Open+Sans+Condensed:300|Roboto" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script>
+    // ── Firebase config ──────────────────────────────────────────────────────
+    const firebaseConfig = {
+        apiKey:            "AIzaSyAT0WFWB6Hcnto0SgcGuhMb4ywp4-tXHGw",
+        authDomain:        "clicklogs-study.firebaseapp.com",
+        projectId:         "clicklogs-study",
+        storageBucket:     "clicklogs-study.firebasestorage.app",
+        messagingSenderId: "731078032645",
+        appId:             "1:731078032645:web:f9ffd7682ab7b5c9f1cb6c"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // ── State variables ───────────────────────────────────────────────────────
+    var totalTouchDuration  = 0;
+    var tapCounter          = 0;
+    var startTap            = 0;
+    var tapLogsArray        = [];
+    var tapLimit            = 50;
+    var uniqueIdentifier    = 0;
+    var dependentVariable   = "";
+    var showFeedback        = false;
+    var initialShowFeedback = false;
+    var interfaceVariations = 2;
+    var interfaceSequence   = 1;
+    var sessionComplete     = false;
+    var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    // ── Initialise on page load ───────────────────────────────────────────────
+    function onLoad() {
+        var d = new Date();
+        // Randomly assign feedback mode based on millisecond parity
+        if (d.getTime() % 2 === 0) showFeedback = true;
+        initialShowFeedback = showFeedback;
+        // Generate unique session ID: timestamp + small random suffix
+        uniqueIdentifier = d.getTime() + "" + Math.floor(Math.random() * 42);
+
+        // Auto-detect platform and hide the irrelevant selection button
+        if (isMobile) {
+            document.getElementById("variable2").style.display = "none"; // hide PC
+        } else {
+            document.getElementById("variable1").style.display = "none"; // hide Android
+        }
+
+        var btn = document.getElementById('tapHere');
+
+        // Mouse events for PC
+        btn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            startTap = Date.now();
+        });
+        btn.addEventListener('mouseup', function(e) {
+            e.preventDefault();
+            if (startTap > 0) recordTap(startTap, Date.now());
+            startTap = 0;
+        });
+
+        // Touch events for mobile
+        btn.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            startTap = Date.now();
+        }, { passive: false });
+        btn.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            if (startTap > 0) recordTap(startTap, Date.now());
+            startTap = 0;
+        }, { passive: false });
+    }
+
+    // ── Record a single tap ───────────────────────────────────────────────────
+    function recordTap(start, end) {
+        if (sessionComplete) return;
+        var duration = end - start;
+        // Ignore accidental or held taps
+        if (duration < 0 || duration > 5000) return;
+
+        tapCounter++;
+        totalTouchDuration += duration;
+        var mean = Math.round(totalTouchDuration / tapCounter);
+
+        // Store tap data locally until the round is complete
+        tapLogsArray.push({
+            tapSequenceNumber: tapCounter,
+            startTimestamp:    start,
+            endTimestamp:      end,
+            interfaceSequence: interfaceSequence,
+            interface:         showFeedback ? "feedbackshown" : "nofeedback"
+        });
+
+        // Update the on-screen counter
+        if (showFeedback) {
+            document.getElementById("counter").innerHTML =
+                "Mean tap duration: <span class='spanTime'>" + mean + "</span> ms";
+        } else {
+            document.getElementById("counter").innerHTML =
+                "Tap <span class='spanTime'>" + tapCounter + "</span> / 50";
+        }
+
+        // Check if round is complete
+        if (tapCounter >= tapLimit) {
+            document.getElementById("counter").innerHTML =
+                '<span class="spanWhite">Round ' + interfaceSequence +
+                ' done! Mean: <span class="spanTime">' + mean + '</span> ms</span>';
+
+            if (interfaceSequence < interfaceVariations) {
+                // Show continue button to start round 2
+                document.getElementById("tapHere").style.display  = "none";
+                document.getElementById("continue").style.display = "block";
+            } else {
+                // Both rounds complete — save all data
+                sessionComplete = true;
+                document.getElementById("tapHere").style.display  = "none";
+                document.getElementById("continue").style.display = "none";
+                saveData();
+            }
+        }
+    }
+
+    // ── Store selected platform and start round 1 ─────────────────────────────
+    function saveDependentVariable(dVariable) {
+        dependentVariable = dVariable;
+        document.getElementById("buttoncontainer").style.display = "none";
+        document.getElementById("container").style.display       = "inline-block";
+        document.getElementById("counter").innerHTML =
+            '<span class="spanWhite">Round 1 of 2 — tap 50 times</span>';
+    }
+
+    // ── Start round 2 ────────────────────────────────────────────────────────
+    function startNext() {
+        interfaceSequence  = 2;
+        tapCounter         = 0;
+        totalTouchDuration = 0;
+        startTap           = 0;
+        showFeedback       = !initialShowFeedback;   // swap feedback mode
+        document.getElementById("tapHere").style.display  = "block";
+        document.getElementById("continue").style.display = "none";
+        document.getElementById("counter").innerHTML =
+            '<span class="spanWhite">Round 2 of 2 — tap 50 times</span>';
+    }
+
+    // ── Save all tap data ─────────────────────────────────────────────────────
+    // PRIMARY path: POST to saveTaps.php (server-side)
+    // FALLBACK:     write directly to Firestore if PHP is unavailable
+    async function saveData() {
+        document.getElementById("counter").innerHTML =
+            '<span class="spanWhite">Saving your data…</span>';
+
+        var payload = {
+            sessionId: uniqueIdentifier,
+            platform:  dependentVariable.toLowerCase(),
+            taps:      tapLogsArray
+        };
+
+        try {
+            // ── Primary: send to PHP backend ──────────────────────────────
+            var response = await fetch("saveTaps.php", {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                var result = await response.json();
+                if (result.saved && result.saved > 0) {
+                    document.getElementById("container").innerHTML =
+                        '<span class="spanWhite">✅ Data saved via server (' +
+                        result.saved + ' taps). Thank you!</span>';
+                    return;
+                }
+            }
+            // If PHP returned an error, fall through to Firestore fallback
+            throw new Error("PHP backend unavailable or returned error");
+
+        } catch (phpErr) {
+            console.warn("PHP backend failed, falling back to direct Firestore:", phpErr);
+            // ── Fallback: write directly to Firestore ─────────────────────
+            await syncToFirestore(payload);
+        }
+    }
+
+    // ── Direct Firestore write (fallback) ─────────────────────────────────────
+    async function syncToFirestore(payload) {
+        var serverTimestamp = Date.now();
+        var batch = db.batch();
+
+        for (var i = 0; i < payload.taps.length; i++) {
+            var tap    = payload.taps[i];
+            var docRef = db.collection('tap_logs').doc();
+            batch.set(docRef, {
+                // Session-level fields
+                sessionId:         payload.sessionId,
+                platform:          payload.platform,
+                // Tap-level fields
+                tapSequenceNumber: tap.tapSequenceNumber,
+                startTimestamp:    tap.startTimestamp,
+                endTimestamp:      tap.endTimestamp,
+                // Pre-computed so queries can sort/filter without arithmetic
+                durationMs:        tap.endTimestamp - tap.startTimestamp,
+                interfaceType:     tap.interface,
+                interfaceSequence: tap.interfaceSequence,
+                serverTimestamp:   serverTimestamp
+            });
+        }
+
+        try {
+            await batch.commit();
+            document.getElementById("container").innerHTML =
+                '<span class="spanWhite">✅ Data saved successfully. Thank you!</span>';
+        } catch (err) {
+            console.error("Firestore error:", err);
+            document.getElementById("container").innerHTML =
+                '<span class="spanWhite">❌ Save failed: ' + err.message + '</span>';
+        }
+    }
+    </script>
+</head>
+<body onload="onLoad()">
+    <div>
+        <div id="buttoncontainer">
+            <button type="button" onclick="saveDependentVariable('android')" id="variable1">Android</button>
+            <button type="button" onclick="saveDependentVariable('pc')"      id="variable2">PC</button>
+        </div>
+        <div id="container" class="container">
+            <div id="counter"></div>
+            <div id="action"></div>
+            <button id="tapHere"><img src="2x/round_touch_app_white_36dp.png"/></button>
+            <button id="continue" onclick="startNext()">Continue</button>
+        </div>
+    </div>
+</body>
+</html>
