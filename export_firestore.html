@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Firestore → MongoDB Exporter</title>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 60px auto; text-align: center; background: #1a1a2e; color: white; }
+        h2   { color: #00d4ff; }
+        button { background: #00d4ff; color: #000; border: none; padding: 16px 40px; font-size: 18px; border-radius: 8px; cursor: pointer; margin: 10px; }
+        button:hover { background: #00b8d9; }
+        #status { margin-top: 20px; font-size: 16px; color: #aaa; }
+        #preview { text-align: left; background: #0f0f23; padding: 16px; border-radius: 8px; margin-top: 20px; font-size: 12px; max-height: 300px; overflow-y: auto; display: none; }
+    </style>
+</head>
+<body>
+    <h2>Firestore → MongoDB Exporter</h2>
+    <p>Click the button to fetch all <strong>tap_logs</strong> from Firestore<br>and download as a JSON file ready for MongoDB import.</p>
+
+    <button onclick="fetchAndExport()">⬇ Export tap_logs to JSON</button>
+
+    <div id="status">Ready — click above to start</div>
+    <pre id="preview"></pre>
+
+    <script>
+    const firebaseConfig = {
+        apiKey:            "AIzaSyAT0WFWB6Hcnto0SgcGuhMb4ywp4-tXHGw",
+        authDomain:        "clicklogs-study.firebaseapp.com",
+        projectId:         "clicklogs-study",
+        storageBucket:     "clicklogs-study.firebasestorage.app",
+        messagingSenderId: "731078032645",
+        appId:             "1:731078032645:web:f9ffd7682ab7b5c9f1cb6c"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    async function fetchAndExport() {
+        document.getElementById("status").innerText = "⏳ Fetching data from Firestore...";
+        document.getElementById("preview").style.display = "none";
+
+        try {
+            const snapshot = await db.collection("tap_logs").get();
+
+            if (snapshot.empty) {
+                document.getElementById("status").innerText = "❌ No documents found in tap_logs.";
+                return;
+            }
+
+            // Build array in MongoDB-import format (one JSON object per doc)
+            const docs = [];
+            snapshot.forEach(doc => {
+                docs.push({ _id: doc.id, ...doc.data() });
+            });
+
+            document.getElementById("status").innerText =
+                "✅ Found " + docs.length + " tap records. Downloading...";
+
+            // Show preview of first 3 docs
+            const preview = document.getElementById("preview");
+            preview.style.display = "block";
+            preview.innerText = JSON.stringify(docs.slice(0, 3), null, 2) + "\n\n... (" + docs.length + " total)";
+
+            // Download as tap_logs.json
+            const blob = new Blob([JSON.stringify(docs, null, 2)], { type: "application/json" });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement("a");
+            a.href     = url;
+            a.download = "tap_logs.json";
+            a.click();
+            URL.revokeObjectURL(url);
+
+        } catch (err) {
+            document.getElementById("status").innerText = "❌ Error: " + err.message;
+            console.error(err);
+        }
+    }
+    </script>
+</body>
+</html>
